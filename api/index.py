@@ -8,18 +8,16 @@ import base64
 import typing as t
 from datetime import datetime
 from dotenv import load_dotenv
+from mangum import Mangum
 
-# Cargar variables de entorno
 load_dotenv()
 
-# Crear instancia de FastAPI
 app = FastAPI(
     title="Azure DevOps Proxy API",
     description="Expose endpoints to list projects and create Bugs in Azure DevOps",
     version="1.0.0",
 )
 
-# Middleware CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -27,7 +25,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Funciones de configuración
+
 def get_azure_config() -> t.Tuple[str, str]:
     org = os.getenv("AZURE_DEVOPS_ORG")
     pat = os.getenv("AZURE_DEVOPS_PAT")
@@ -44,7 +42,6 @@ def build_auth_header(pat: str) -> str:
     return f"Basic {b64}"
 
 
-# Modelo de entrada para crear Bugs
 class BugCreateRequest(BaseModel):
     project: str
     userStoryId: int
@@ -73,7 +70,6 @@ class BugCreateRequest(BaseModel):
         return v
 
 
-# Manejo de errores
 @app.exception_handler(RuntimeError)
 async def runtime_error_handler(request: Request, exc: RuntimeError):
     return JSONResponse(
@@ -89,11 +85,25 @@ async def httpx_error_handler(request: Request, exc: httpx.HTTPError):
         content={"detail": f"Error en la comunicación con Azure DevOps: {str(exc)}"},
     )
 
+# ----------------- INICIO DEL CÓDIGO AÑADIDO/CORREGIDO -----------------
 
-# Endpoint: listar proyectos
+@app.get("/")
+async def read_root():
+    """
+    Endpoint para verificar que la API está funcionando.
+    Retorna un mensaje de bienvenida.
+    """
+    return {"message": "¡La API está funcionando correctamente! Usa /projects o /bugs."}
+
+# ----------------- FIN DEL CÓDIGO AÑADIDO/CORREGIDO -----------------
+
+
 @app.get("/projects")
 async def list_projects():
-    org, pat = get_azure_config()
+    try:
+        org, pat = get_azure_config()
+    except RuntimeError as e:
+        raise e
 
     url = f"https://dev.azure.com/{org}/_apis/projects?api-version=7.1-preview"
     headers = {
@@ -121,7 +131,6 @@ async def list_projects():
     return resp.json()
 
 
-# Función auxiliar: buscar usuario en Azure DevOps
 async def find_user_principal_name(
     org: str, pat: str, display_name: str
 ) -> t.Optional[str]:
@@ -156,10 +165,12 @@ async def find_user_principal_name(
     return None
 
 
-# Endpoint: crear bug
 @app.post("/bugs", status_code=status.HTTP_201_CREATED)
 async def create_bug(request_body: BugCreateRequest):
-    org, pat = get_azure_config()
+    try:
+        org, pat = get_azure_config()
+    except RuntimeError as e:
+        raise e
 
     fecha_con_hora = f"{request_body.fechaInicioPlaneada}T00:00:00-05:00"
     TESTER_NAME = "Antony Daniel Gutierrez Salgado"
@@ -290,7 +301,4 @@ async def create_bug(request_body: BugCreateRequest):
         )
 
 
-# Solo para desarrollo local
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+handler = Mangum(app)
